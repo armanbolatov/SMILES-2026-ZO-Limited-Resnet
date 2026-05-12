@@ -171,27 +171,22 @@ class ZeroOrderOptimizer:
         # ------------------------------------------------------------------
         # STUDENT: Replace or extend the gradient estimation below.
         # ------------------------------------------------------------------
-        grads: dict[str, torch.Tensor] = {}
-
+        u = {
+            n: torch.randint(0, 2, p.shape, device=p.device, dtype=p.dtype).mul_(2).sub_(1)
+            for n, p in params.items()
+        }
         with torch.no_grad():
-            for name, param in params.items():
-                u = self._sample_direction(param)
+            for n, p in params.items():
+                p.data.add_(u[n], alpha=self.eps)
+            f_plus = float(loss_fn())
+            for n, p in params.items():
+                p.data.add_(u[n], alpha=-2.0 * self.eps)
+            f_minus = float(loss_fn())
+            for n, p in params.items():
+                p.data.add_(u[n], alpha=self.eps)
 
-                # f(x + eps * u)
-                param.data.add_(self.eps * u)
-                f_plus = loss_fn()
-
-                # f(x - eps * u)  — restore then subtract
-                param.data.sub_(2.0 * self.eps * u)
-                f_minus = loss_fn()
-
-                # Restore original value
-                param.data.add_(self.eps * u)
-
-                grad_estimate = ((f_plus - f_minus) / (2.0 * self.eps)) * u
-                grads[name] = grad_estimate
-
-        return grads
+        coeff = (f_plus - f_minus) / (2.0 * self.eps)
+        return {n: v * coeff for n, v in u.items()}
         # ------------------------------------------------------------------
 
     def _update_params(
@@ -219,8 +214,11 @@ class ZeroOrderOptimizer:
         # STUDENT: Replace or extend the parameter update below.
         # ------------------------------------------------------------------
         with torch.no_grad():
-            for name, param in params.items():
-                param.data.sub_(self.lr * grads[name])
+            theta_norm = math.sqrt(sum(p.data.pow(2).sum().item() for p in params.values()))
+            g_norm = math.sqrt(sum(g.pow(2).sum().item() for g in grads.values()))
+            alpha = self.lr * theta_norm / (g_norm + 1e-12)
+            for n, p in params.items():
+                p.data.sub_(grads[n], alpha=alpha)
         # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
@@ -252,11 +250,16 @@ class ZeroOrderOptimizer:
         """
         params = self._active_params()
 
-        # Record the loss before any perturbation.
         with torch.no_grad():
-            loss_before = loss_fn()
+            loss_before = float(loss_fn())
 
+        saved = {n: p.data.clone() for n, p in params.items()}
         grads = self._estimate_grad(loss_fn, params)
         self._update_params(params, grads)
 
-        return float(loss_before)
+        with torch.no_grad():
+            if float(loss_fn()) > loss_before:
+                for n, p in params.items():
+                    p.data.copy_(saved[n])
+
+        return loss_before

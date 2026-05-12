@@ -47,7 +47,9 @@ def get_transforms(train: bool) -> T.Compose:
                 # between or around them as appropriate.
                 # ----------------------------------------------------------
                 T.Resize(224),
+                T.RandomCrop(224, padding=8, padding_mode="reflect"),
                 T.RandomHorizontalFlip(),
+                T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
                 # Add more augmentations here ↓
                 T.ToTensor(),
                 T.Normalize(mean=_CIFAR100_MEAN, std=_CIFAR100_STD),
